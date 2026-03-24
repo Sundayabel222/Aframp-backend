@@ -377,6 +377,46 @@ async fn main() -> anyhow::Result<()> {
         info!("Offramp processor worker disabled (OFFRAMP_PROCESSOR_ENABLED=false)");
     }
 
+    // Start Onramp Processor Worker
+    let onramp_enabled = std::env::var("ONRAMP_PROCESSOR_ENABLED")
+        .unwrap_or_else(|_| "true".to_string())
+        .to_lowercase()
+        != "false";
+    let mut onramp_handle = None;
+    if onramp_enabled {
+        if let (Some(pool), Some(client), Some(factory)) =
+            (db_pool.clone(), stellar_client.clone(), provider_factory.clone())
+        {
+            let config = workers::onramp_processor::OnrampProcessorConfig::from_env();
+            if config.system_wallet_address.is_empty() || config.system_wallet_secret.is_empty() {
+                error!("SYSTEM_WALLET_ADDRESS or SYSTEM_WALLET_SECRET not set — skipping onramp processor");
+            } else {
+                info!(
+                    poll_interval_secs = config.poll_interval_secs,
+                    pending_timeout_mins = config.pending_timeout_mins,
+                    stellar_max_retries = config.stellar_max_retries,
+                    "Starting onramp processor worker"
+                );
+                let processor = workers::onramp_processor::OnrampProcessor::new(
+                    pool,
+                    client,
+                    std::sync::Arc::new(factory),
+                    config,
+                );
+                onramp_handle = Some(tokio::spawn(async move {
+                    if let Err(e) = processor.run(worker_shutdown_rx.clone()).await {
+                        error!(error = %e, "Onramp processor exited with error");
+                    }
+                }));
+                info!("✅ Onramp processor worker started");
+            }
+        } else {
+            info!("Skipping onramp processor worker (missing db pool, stellar client, or provider factory)");
+        }
+    } else {
+        info!("Onramp processor worker disabled (ONRAMP_PROCESSOR_ENABLED=false)");
+    }
+
     // Initialize webhook processor and retry worker
     let webhook_routes = if let Some(pool) = db_pool.clone() {
         let webhook_repo = std::sync::Arc::new(
