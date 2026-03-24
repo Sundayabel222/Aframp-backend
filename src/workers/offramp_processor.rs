@@ -367,7 +367,7 @@ impl OfframpProcessorWorker {
     }
 
     #[instrument(skip(self), name = "offramp_processor_cycle")]
-    async fn run_cycle(&self) -> Result<(), OfframpError> {
+    pub async fn run_cycle(&self) -> Result<(), OfframpError> {
         debug!("Running offramp processor cycle");
 
         // Stage 1: Receipt Verification

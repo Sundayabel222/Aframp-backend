@@ -12,6 +12,7 @@ mod services;
 mod workers;
 
 // Imports
+use std::sync::Arc;
 use crate::health::{HealthChecker, HealthStatus};
 use crate::logging::init_tracing;
 use crate::payments::factory::PaymentProviderFactory;

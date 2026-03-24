@@ -1,14 +1,7 @@
 pub mod offramp_processor;
 pub mod transaction_monitor;
 pub mod webhook_retry;
-pub mod bill_processor {
-    pub mod account_verification;
-    pub mod payment_executor;
-    pub mod providers;
-    pub mod refund_handler;
-    pub mod token_manager;
-    pub mod types;
-}
+pub mod bill_processor;
 
 /// Determine if a failed payment is eligible for refund
 pub fn is_eligible_for_refund(
