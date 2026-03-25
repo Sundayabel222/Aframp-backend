@@ -807,12 +807,24 @@ async fn main() -> anyhow::Result<()> {
             cngn_issuer: cngn_issuer_for_initiate,
         });
 
+        let onramp_integrity_state = crate::middleware::request_integrity::RequestIntegrityState {
+            endpoint: crate::middleware::request_integrity::IntegrityEndpoint::OnrampInitiate,
+            db: db_pool.clone().map(std::sync::Arc::new),
+            cache: Some(std::sync::Arc::new(cache.clone())),
+        };
+
         Router::new()
             .route("/api/onramp/quote", post(create_onramp_quote))
             .with_state(quote_service)
             .route("/api/onramp/status/tx_id", get(api::onramp::get_onramp_status))
             .with_state(status_service)
-            .route("/api/onramp/initiate", post(api::onramp::initiate_onramp))
+            .route(
+                "/api/onramp/initiate",
+                post(api::onramp::initiate_onramp).route_layer(axum::middleware::from_fn_with_state(
+                    onramp_integrity_state,
+                    crate::middleware::request_integrity::request_integrity_middleware,
+                )),
+            )
             .with_state(initiate_state)
     } else {
         Router::new()
@@ -945,8 +957,20 @@ async fn main() -> anyhow::Result<()> {
             cngn_issuer_address,
         };
 
+        let offramp_integrity_state = crate::middleware::request_integrity::RequestIntegrityState {
+            endpoint: crate::middleware::request_integrity::IntegrityEndpoint::OfframpInitiate,
+            db: Some(offramp_state.db_pool.clone()),
+            cache: Some(offramp_state.redis_cache.clone()),
+        };
+
         Router::new()
-            .route("/api/offramp/initiate", post(api::offramp::initiate_withdrawal))
+            .route(
+                "/api/offramp/initiate",
+                post(api::offramp::initiate_withdrawal).route_layer(axum::middleware::from_fn_with_state(
+                    offramp_integrity_state,
+                    crate::middleware::request_integrity::request_integrity_middleware,
+                )),
+            )
             .with_state(std::sync::Arc::new(offramp_state))
     } else {
         info!("⏭️  Skipping offramp routes (missing database or cache)");
@@ -1023,9 +1047,31 @@ async fn main() -> anyhow::Result<()> {
     // ── Batch transaction routes (Issue #125) ────────────────────────────────
     let batch_routes = if let Some(pool) = db_pool.clone() {
         let batch_state = api::batch::BatchState::new(std::sync::Arc::new(pool));
+        let batch_cngn_integrity_state = crate::middleware::request_integrity::RequestIntegrityState {
+            endpoint: crate::middleware::request_integrity::IntegrityEndpoint::BatchCngnTransfer,
+            db: Some(batch_state.db.clone()),
+            cache: redis_cache.clone().map(std::sync::Arc::new),
+        };
+        let batch_fiat_integrity_state = crate::middleware::request_integrity::RequestIntegrityState {
+            endpoint: crate::middleware::request_integrity::IntegrityEndpoint::BatchFiatPayout,
+            db: Some(batch_state.db.clone()),
+            cache: redis_cache.clone().map(std::sync::Arc::new),
+        };
         Router::new()
-            .route("/api/batch/cngn-transfer", post(api::batch::create_cngn_transfer_batch))
-            .route("/api/batch/fiat-payout",   post(api::batch::create_fiat_payout_batch))
+            .route(
+                "/api/batch/cngn-transfer",
+                post(api::batch::create_cngn_transfer_batch).route_layer(axum::middleware::from_fn_with_state(
+                    batch_cngn_integrity_state,
+                    crate::middleware::request_integrity::request_integrity_middleware,
+                )),
+            )
+            .route(
+                "/api/batch/fiat-payout",
+                post(api::batch::create_fiat_payout_batch).route_layer(axum::middleware::from_fn_with_state(
+                    batch_fiat_integrity_state,
+                    crate::middleware::request_integrity::request_integrity_middleware,
+                )),
+            )
             .route("/api/batch/{batch_id}",    get(api::batch::get_batch_status))
             .with_state(batch_state)
     } else {

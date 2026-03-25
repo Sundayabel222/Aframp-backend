@@ -12,3 +12,5 @@ pub mod error;
 pub mod rate_limit;
 pub mod metrics;
 pub mod api_key;
+#[cfg(feature = "database")]
+pub mod request_integrity;
