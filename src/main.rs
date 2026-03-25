@@ -6,6 +6,7 @@ mod chains;
 mod config;
 mod config_validation;
 mod database;
+mod developer_portal;
 mod error;
 mod health;
 mod logging;
@@ -15,6 +16,7 @@ mod oauth;
 mod payments;
 mod recurring;
 mod services;
+mod telemetry;
 mod workers;
 
 // Imports
@@ -49,9 +51,6 @@ use tower_http::request_id::{PropagateRequestIdLayer, SetRequestIdLayer};
 use tracing::{error, info};
 use uuid::Uuid;
 
-// Re-export the telemetry module so `init_tracer` / `shutdown_tracer` resolve.
-// In the real project this module lives at src/telemetry/mod.rs (Issue #104).
-mod telemetry;
 
 /// Graceful shutdown signal handler
 async fn shutdown_signal() {
@@ -1292,6 +1291,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(developer_routes)
         .merge(oauth_routes)
         .merge(history_routes)
+        .merge(developer_portal::routes::register_developer_portal_routes(Router::new(), db_pool.clone()))
         .with_state(AppState {
             db_pool,
             redis_cache,
