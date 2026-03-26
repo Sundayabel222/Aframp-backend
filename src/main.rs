@@ -6,6 +6,8 @@ mod chains;
 mod config;
 mod config_validation;
 mod database;
+mod ddos;
+mod developer_portal;
 mod error;
 mod health;
 mod logging;
@@ -15,6 +17,7 @@ mod oauth;
 mod payments;
 mod recurring;
 mod services;
+mod telemetry;
 mod workers;
 
 // Imports
@@ -51,9 +54,6 @@ use tower_http::request_id::{PropagateRequestIdLayer, SetRequestIdLayer};
 use tracing::{error, info};
 use uuid::Uuid;
 
-// Re-export the telemetry module so `init_tracer` / `shutdown_tracer` resolve.
-// In the real project this module lives at src/telemetry/mod.rs (Issue #104).
-mod telemetry;
 
 /// Graceful shutdown signal handler
 async fn shutdown_signal() {
@@ -1157,7 +1157,27 @@ async fn main() -> anyhow::Result<()> {
         let keys_state = api::admin::keys::AdminKeysState {
             db: std::sync::Arc::new(pool.clone()),
         };
-        Router::new()
+
+        // ── Revocation & Blacklist routes (Issue #138) ────────────────────────
+        let revocation_state = if let Some(ref redis) = redis_cache {
+            let svc = std::sync::Arc::new(services::revocation::RevocationService::new(
+                std::sync::Arc::new(pool.clone()),
+                std::sync::Arc::new(redis.clone()),
+                notification_service.clone(),
+            ));
+            let svc_clone = svc.clone();
+            tokio::spawn(async move {
+                if let Err(e) = svc_clone.bootstrap_redis_blacklist().await {
+                    tracing::error!(error = %e, "Redis blacklist bootstrap failed");
+                }
+            });
+            Some(api::admin::revocation::RevocationState { service: svc })
+        } else {
+            info!("Skipping revocation service (no Redis)");
+            None
+        };
+
+        let mut router = Router::new()
             .route("/api/admin/scopes", get(api::admin::scopes::list_scopes))
             .route(
                 "/api/admin/consumers/{consumer_id}/keys/{key_id}/scopes",
@@ -1182,6 +1202,27 @@ async fn main() -> anyhow::Result<()> {
     } else {
         info!("Skipping admin routes (no database)");
         Router::new()
+    };
+
+    // ── DDoS protection state and admin routes ────────────────────────────────
+    let (ddos_state, ddos_admin_routes) = if let Some(ref cache) = redis_cache {
+        let ddos_config = ddos::config::DdosConfig::from_env();
+        let state = std::sync::Arc::new(ddos::state::DdosState::new(ddos_config, cache.clone()));
+        // Spawn CDN sync background task
+        {
+            let s = state.clone();
+            let interval = state.config.cdn_sync_interval_secs;
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(std::time::Duration::from_secs(interval));
+                loop { ticker.tick().await; s.sync_cdn_blocklist().await; }
+            });
+        }
+        let routes = ddos::admin::ddos_admin_router(state.clone());
+        info!("✅ DDoS protection enabled");
+        (Some(state), routes)
+    } else {
+        info!("⏭️  Skipping DDoS protection (no Redis cache)");
+        (None, Router::new())
     };
 
     // ── Key rotation routes (Issue #137) ─────────────────────────────────────
@@ -1294,6 +1335,8 @@ async fn main() -> anyhow::Result<()> {
         .merge(developer_routes)
         .merge(oauth_routes)
         .merge(history_routes)
+        .merge(ddos_admin_routes)
+        .merge(developer_portal::routes::register_developer_portal_routes(Router::new(), db_pool.clone()))
         .with_state(AppState {
             db_pool,
             redis_cache,
@@ -1365,6 +1408,16 @@ async fn main() -> anyhow::Result<()> {
                 crate::middleware::replay_prevention::replay_prevention_middleware,
             ))
             .layer(axum::middleware::from_fn_with_state(rate_limit_state, crate::middleware::rate_limit::rate_limit_middleware))
+    } else {
+        app
+    };
+
+    // Apply DDoS middleware if state was initialised
+    let app = if let Some(ds) = ddos_state {
+        app.layer(axum::middleware::from_fn_with_state(
+            ds,
+            crate::ddos::middleware::ddos_middleware,
+        ))
     } else {
         app
     };
