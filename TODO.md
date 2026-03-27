@@ -1,53 +1,33 @@
-# Settlement Worker Implementation TODO
-Approved plan from BLACKBOXAI. Progress tracked here. Steps from plan breakdown.
+# Advanced Per-Consumer Rate Limiting - Issue #175
 
-## [x] 0. Git Branch & PR ✅
-- Created `blackboxai/settlement-worker-part1` branch
-- Committed schema, types, metadata (steps 1-4 partial)
-- Pushed & created draft PR
+## Progress Tracker
+- [x] 1. Database Schema & Migrations
+  - [x] Create `consumer_rate_limit_profiles` table
+  - [x] Create `consumer_rate_limit_overrides` table
+[x] Add migration + run `fix-migrations.sh`
+- [x] 2. Database Repository (`src/database/consumer_rate_limit_repository.rs`)
+- [ ] 3. Extend Rate Limit Middleware (`src/middleware/rate_limit.rs`)
+  - [ ] Extract `AuthenticatedKey` consumer_id/type
+  - [ ] Multi-dimension keys (global/endpoint/tx-type/IP)
+  - [ ] Lua scripts: Sliding window + Token Bucket
+  - [ ] Endpoint sensitivity tiers
+  - [ ] Profile + override merging
+- [ ] 4. Admin Rate Limit Endpoints (`src/api/admin/rate_limits.rs`)
+  - [ ] GET/POST/DELETE `/api/admin/consumers/:id/rate-limits`
+- [ ] 5. Metrics & Logging (`src/middleware/rate_limit_metrics.rs`)
+  - [ ] Prometheus: checks/hits/utilisation
+  - [ ] Breach logs/alerts
+- [ ] 6. Update Config (`rate_limits.yaml`)
+- [ ] 7. Integration Tests (`tests/advanced_rate_limit_test.rs`)
+- [ ] 8. Route Wiring (`src/main.rs`, `src/routes/`)
+- [ ] 9. Verification
+  - [ ] `cargo test`
+  - [ ] `cargo check`
+  - [ ] Manual test concurrent requests
+- [ ] 10. Git Branch/PR
+  - [ ] `git checkout -b blackboxai/rate-limiting-175`
+  - [ ] Commit changes
+  - [ ] `gh pr create --title "Fix #175: Advanced Per-Consumer Rate Limiting"`
 
-## [x] 1. Database Migration ✅
-- Created `migrations/20261001000000_create_settlement_schema.sql`
-  - `settlement_batches` table (w/ CHECK constraints)
-  - `reconciliation_reports` table
-  - Indexes + updated_at triggers + comments
+**Current Step: 1/10**
 
-## [x] 2. Core Types ✅
-- Created `src/database/settlement.rs` - `SettlementBatchStatus` + `ReconciliationStatus` enums, transitions, tests
-
-## [x] 3. Metadata Types ✅
-- Created `src/workers/settlement_metadata.rs` - `SettlementMetadata` struct w/ json roundtrip, tx tracking, failure/retry logic, tests
-
-## [ ] 4. Repository
-- `src/database/settlement_repository.rs`
-  - CRUD for batches/reports
-  - Query eligible txns
-  - Fee calcs
-
-## [ ] 5. Config
-- Edit `src/config.rs` - Add `SettlementWorkerConfig`
-
-## [ ] 6. Worker Implementation
-- `src/workers/settlement_worker.rs`
-  - Config, new(), run(), run_cycle()
-  - Stages: initiations, monitoring, reconciliation
-
-## [ ] 7. Exports & Registration
-- Edit `src/workers/mod.rs` - `pub mod settlement_worker;`
-- Edit `src/main.rs` - Spawn tokio::spawn(worker.run(shutdown_rx.clone()))
-
-## [ ] 8. Tests
-- Unit tests in settlement_worker.rs
-- Integration tests/settlement_integration.rs
-
-## [ ] 9. Seeds & Scripts
-- `db/seed_settlement_fees.sql`
-- `setup-settlement-fees.sh`
-
-## [ ] 10. Verification
-- `sqlx migrate run`
-- `cargo test`
-- `cargo run` - log/metric checks
-- Manual E2E: insert completed txns, verify batch/recon
-
-**Next:** Complete step 4 - Repository implementation.
