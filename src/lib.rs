@@ -119,6 +119,9 @@ pub mod masking;
 #[cfg(feature = "database")]
 pub mod gateway;
 
+// Adaptive rate limiting and throttling system
+#[cfg(feature = "cache")]
+pub mod adaptive_rate_limit;
 // mTLS certificate lifecycle management
 #[cfg(feature = "database")]
 pub mod mtls;
