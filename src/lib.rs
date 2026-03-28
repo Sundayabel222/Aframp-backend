@@ -102,6 +102,7 @@ pub mod crypto;
 // Platform key management framework (Issue — Key Management & Rotation)
 #[cfg(feature = "database")]
 pub mod key_management;
+
 // Penetration testing & security review framework
 #[cfg(feature = "database")]
 pub mod pentest;
@@ -113,6 +114,10 @@ pub mod masking;
 // API gateway security policy enforcement
 #[cfg(feature = "database")]
 pub mod gateway;
+
+// Microservice-to-microservice authentication
+#[cfg(feature = "database")]
+pub mod service_auth;
 
 // Contract error enum for Soroban (only when not using database feature)
 #[cfg(not(feature = "database"))]
