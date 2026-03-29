@@ -690,6 +690,31 @@ async fn main() -> anyhow::Result<()> {
         info!("Payment poller worker disabled (PAYMENT_POLLER_ENABLED=false)");
     }
 
+    // Start Supply Monitor Worker
+    let supply_monitor_enabled = std::env::var("SUPPLY_MONITOR_ENABLED")
+        .unwrap_or_else(|_| "true".to_string())
+        .to_lowercase() != "false";
+    if supply_monitor_enabled {
+        if let (Some(pool), Some(client)) = (db_pool.clone(), stellar_client.clone()) {
+            let asset_issuer = std::env::var("CNGN_ISSUER_ADDRESS")
+                .or_else(|_| std::env::var("CNGN_ISSUER_MAINNET"))
+                .unwrap_or_default();
+            
+            if asset_issuer.is_empty() {
+                warn!("CNGN_ISSUER_ADDRESS not set — skipping supply monitor worker");
+            } else {
+                let worker = workers::supply_monitor_worker::SupplyMonitorWorker::new(
+                    pool,
+                    client,
+                    notification_service.clone(),
+                    asset_issuer,
+                );
+                tokio::spawn(worker.run(worker_shutdown_rx.clone()));
+                info!("✅ cNGN supply monitor worker started");
+            }
+        }
+    }
+
     // Initialize webhook processor and retry worker
     let webhook_routes = if let Some(pool) = db_pool.clone() {
         let webhook_repo = std::sync::Arc::new(
