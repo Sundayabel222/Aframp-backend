@@ -15,6 +15,7 @@ mod error;
 mod health;
 mod logging;
 mod metrics;
+mod peg_monitor;
 mod middleware;
 mod mtls;
 mod oauth;
@@ -1766,6 +1767,40 @@ async fn main() -> anyhow::Result<()> {
         info!("⏭️  Skipping transparency routes (no database)");
         Router::new()
     };
+
+    // ── Peg Integrity Monitor ─────────────────────────────────────────────────
+    let peg_monitor_routes = if let (Some(pool), Some(client)) =
+        (db_pool.clone(), stellar_client.clone())
+    {
+        let peg_repo = std::sync::Arc::new(peg_monitor::PegMonitorRepository::new(pool));
+        let asset_code = std::env::var("CNGN_ASSET_CODE").unwrap_or_else(|_| "cNGN".to_string());
+        let asset_issuer = std::env::var("CNGN_ISSUER_ADDRESS")
+            .or_else(|_| std::env::var("CNGN_ISSUER_MAINNET"))
+            .unwrap_or_default();
+
+        let peg_enabled = std::env::var("PEG_MONITOR_ENABLED")
+            .unwrap_or_else(|_| "true".to_string())
+            .to_lowercase()
+            != "false";
+
+        if peg_enabled && !asset_issuer.is_empty() {
+            let worker = peg_monitor::PegMonitorWorker::new(
+                peg_repo.clone(),
+                client,
+                asset_code,
+                asset_issuer,
+            );
+            tokio::spawn(worker.run(worker_shutdown_rx.clone()));
+            info!("✅ Peg Integrity Monitor worker started");
+        } else {
+            info!("⏭️  Peg monitor worker skipped (disabled or missing CNGN_ISSUER_ADDRESS)");
+        }
+
+        peg_monitor::peg_monitor_routes(peg_repo)
+    } else {
+        info!("⏭️  Skipping peg monitor routes (missing database or stellar client)");
+        Router::new()
+    };
     let app = Router::new()
         .route("/", get(root))
         .route("/health", get(health))
@@ -1826,6 +1861,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(Router::new().nest("/api/admin/security", mtls_admin_routes))
         .merge(transparency_routes)
         .merge(security_compliance_routes)
+        .merge(peg_monitor_routes)
         .with_state(AppState {
             db_pool,
             redis_cache,

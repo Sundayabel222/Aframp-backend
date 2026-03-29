@@ -58,6 +58,10 @@ pub mod admin;
 #[cfg(feature = "database")]
 pub mod analytics;
 
+// Peg Integrity Monitor — real-time cNGN/NGN price deviation detection
+#[cfg(feature = "database")]
+pub mod peg_monitor;
+
 // Data classification framework — authoritative sensitivity taxonomy and
 // policy enforcement for every data field on the platform.
 #[cfg(feature = "database")]
