@@ -1920,7 +1920,30 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 Router::new()
             }
-        })        .with_state(AppState {
+        })
+        .merge({
+            // ── Corridor Router routes (Issue #2.04) ─────────────────────────
+            if let Some(ref pool) = db_pool {
+                use corridors::router::{
+                    handlers::CorridorRouterState,
+                    repository::CorridorRouterRepository,
+                    routes::{corridor_router_admin, corridor_router_public},
+                    service::CorridorRouterService,
+                };
+
+                let repo = std::sync::Arc::new(CorridorRouterRepository::new(pool.clone()));
+                let svc = std::sync::Arc::new(CorridorRouterService::new(repo));
+                let state = std::sync::Arc::new(CorridorRouterState { service: svc });
+
+                info!("✅ Corridor Router routes enabled");
+                Router::new()
+                    .nest("/api/corridors", corridor_router_public(state.clone()))
+                    .nest("/api/admin/corridors", corridor_router_admin(state))
+            } else {
+                Router::new()
+            }
+        })
+        .with_state(AppState {
             db_pool,
             redis_cache,
             stellar_client,
