@@ -1451,6 +1451,27 @@ async fn main() -> anyhow::Result<()> {
     // ── OpenAPI / Swagger UI (Issue #114) ────────────────────────────────────
     let openapi_routes = api::openapi::openapi_routes();
 
+    // ── Public Transparency / Proof-of-Reserves API ───────────────────────────
+    let transparency_routes = if let Some(pool) = db_pool.clone() {
+        let transparency_key = std::env::var("TRANSPARENCY_SIGNING_KEY").ok();
+        match services::transparency::TransparencyService::new(pool, transparency_key) {
+            Ok(svc) => {
+                info!("🔍 Transparency (Proof-of-Reserves) API enabled");
+                let state = std::sync::Arc::new(api::transparency::TransparencyState {
+                    service: std::sync::Arc::new(svc),
+                });
+                api::transparency::transparency_routes(state)
+            }
+            Err(e) => {
+                tracing::warn!("⏭️  Skipping transparency routes: {}", e);
+                Router::new()
+            }
+        }
+    } else {
+        info!("⏭️  Skipping transparency routes (no database)");
+        Router::new()
+    };
+
     // ── Pentest & Security Review Framework ──────────────────────────────────
     let pentest_routes = if let Some(pool) = db_pool.clone() {
         let repo = std::sync::Arc::new(pentest::PentestRepository::new(pool));
@@ -1614,6 +1635,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(history_routes)
         .merge(ddos_admin_routes)
         .merge(pentest_routes)
+        .merge(transparency_routes)
         .merge(developer_portal::routes::register_developer_portal_routes(Router::new(), db_pool.clone()))
         .merge(Router::new().nest("/api/admin/security", mtls_admin_routes))
         .with_state(AppState {
