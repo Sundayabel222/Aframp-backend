@@ -2267,8 +2267,6 @@ async fn main() -> anyhow::Result<()> {
     }
 
     info!("👋 Server shutdown complete");
-
-    // -------------------------------------------------------------------------
     // Flush all buffered spans to the OTLP exporter before the process exits.
     // Must be the very last call so no spans are lost during shutdown.   (Issue #104)
     // -------------------------------------------------------------------------
