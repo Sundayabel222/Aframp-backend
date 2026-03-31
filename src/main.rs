@@ -7,6 +7,7 @@ mod auditor_portal;
 mod auth;
 mod cache;
 mod chains;
+mod compliance_registry;
 mod config;
 mod config_validation;
 mod database;
