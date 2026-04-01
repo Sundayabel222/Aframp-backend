@@ -345,3 +345,27 @@ pub async fn revoke_token(
         Err(_) => auth_error(500, "INTERNAL_ERROR", "Failed to revoke token"),
     }
 }
+
+fn parse_scope(scope: Option<&str>) -> Scope {
+    match scope.unwrap_or("user") {
+        "admin" => Scope::Admin,
+        _ => Scope::User,
+    }
+}
+
+fn jwt_error_response(err: JwtError) -> (StatusCode, Json<serde_json::Value>) {
+    let status = match err {
+        JwtError::MissingToken | JwtError::InvalidToken | JwtError::TokenExpired | JwtError::TokenRevoked => StatusCode::UNAUTHORIZED,
+        JwtError::InsufficientPermissions { .. } => StatusCode::FORBIDDEN,
+        JwtError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+
+    (
+        status,
+        Json(json!({
+            "error": err.to_string(),
+        })),
+    )
+}
+
+}

@@ -17,6 +17,7 @@ mod ddos;
 mod developer_portal;
 mod error;
 mod health;
+mod liquidity;
 mod logging;
 mod lp_payout;
 mod metrics;
@@ -1810,6 +1811,31 @@ async fn main() -> anyhow::Result<()> {
         Router::new()
     };
 
+    // ── Liquidity pool routes and health worker ───────────────────────────────
+    let liquidity_routes = if let (Some(pool), Some(cache)) = (db_pool.clone(), redis_cache.clone()) {
+        let liq_repo = std::sync::Arc::new(liquidity::repository::LiquidityRepository::new(pool));
+        let liq_service = std::sync::Arc::new(liquidity::service::LiquidityService::new(
+            liq_repo.clone(),
+            cache.pool.clone(),
+        ));
+        let liq_state = std::sync::Arc::new(liquidity::handlers::LiquidityHandlerState {
+            repo: liq_repo.clone(),
+            service: liq_service,
+        });
+
+        // Start health worker
+        let health_interval = std::env::var("LIQUIDITY_HEALTH_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60u64);
+        let liq_worker = liquidity::worker::LiquidityHealthWorker::new(liq_repo, health_interval);
+        tokio::spawn(liq_worker.run(worker_shutdown_rx.clone()));
+        info!("✅ Liquidity health worker started (interval={}s)", health_interval);
+
+        liquidity::routes::public_routes(liq_state.clone())
+            .merge(liquidity::routes::admin_routes(liq_state))
+    } else {
+        info!("⏭️  Skipping liquidity routes (missing database or cache)");
     // ── Bug Bounty Programme ──────────────────────────────────────────────────
     let bug_bounty_routes = if let Some(pool) = db_pool.clone() {
         let repo = std::sync::Arc::new(bug_bounty::BugBountyRepository::new(pool));
@@ -2021,6 +2047,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(history_routes)
         .merge(ddos_admin_routes)
         .merge(pentest_routes)
+        .merge(liquidity_routes)
         .merge(transparency_routes)
         .merge(bug_bounty_routes)
         .merge(developer_portal::routes::register_developer_portal_routes(Router::new(), db_pool.clone()))

@@ -127,6 +127,10 @@ pub mod bug_bounty;
 #[cfg(feature = "database")]
 pub mod masking;
 
+// Liquidity pool architecture
+#[cfg(feature = "database")]
+pub mod liquidity;
+
 // API gateway security policy enforcement
 #[cfg(feature = "database")]
 pub mod gateway;
@@ -151,9 +155,6 @@ pub mod mtls;
 // Comprehensive audit logging system
 #[cfg(feature = "database")]
 pub mod audit;
-// Microservice-to-microservice authentication
-#[cfg(feature = "database")]
-pub mod service_auth;
 
 // Abuse detection and automated response system
 #[cfg(feature = "database")]

@@ -1,4 +1,5 @@
 //! Middleware modules for Aframp backend
+
 #[cfg(feature = "database")]
 pub mod api_key;
 
@@ -18,11 +19,11 @@ pub mod ip_blocking;
 pub mod logging;
 
 pub mod metrics;
-pub mod rate_limit;
-pub mod rate_limit_metrics;
 
 #[cfg(feature = "database")]
 pub mod rate_limit;
+
+pub mod rate_limit_metrics;
 
 #[cfg(feature = "database")]
 pub mod replay_prevention;

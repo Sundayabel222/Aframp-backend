@@ -140,6 +140,123 @@ async fn resolve_api_key_full(pool: &PgPool, raw_key: &str) -> LookupResult {
     .fetch_optional(pool)
     .await;
 
+    match row {
+        Err(_) => LookupResult::NotFound,
+        Ok(None) => LookupResult::NotFound,
+        Ok(Some(r)) => {
+            let now = Utc::now();
+            if !r.is_active {
+                return LookupResult::NotFound;
+            }
+            if let Some(exp) = r.expires_at {
+                if exp < now {
+                    let grace_end = exp + chrono::Duration::hours(24);
+                    return LookupResult::Expired {
+                        auth: AuthenticatedKey {
+                            key_id: r.key_id,
+                            consumer_id: r.consumer_id,
+                            consumer_type: r.consumer_type,
+                            scopes: r.scopes.unwrap_or_default(),
+                            environment: String::new(),
+                        },
+                        grace_end,
+                    };
+                }
+            }
+            LookupResult::Valid(AuthenticatedKey {
+                key_id: r.key_id,
+                consumer_id: r.consumer_id,
+                consumer_type: r.consumer_type,
+                scopes: r.scopes.unwrap_or_default(),
+                environment: String::new(),
+            })
+        }
+    }
+}
+
+// ─── Key Extraction ───────────────────────────────────────────────────────────
+
+/// Extract the raw API key from `Authorization: Bearer <key>` or `X-API-Key: <key>`.
+fn extract_raw_key(headers: &HeaderMap) -> Option<String> {
+    // Prefer Authorization: Bearer
+    if let Some(bearer) = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+    {
+        return Some(bearer.to_string());
+    }
+    // Fall back to X-API-Key
+    headers
+        .get("x-api-key")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+}
+
+// ─── Key Resolution ───────────────────────────────────────────────────────────
+
+/// Resolve a raw API key against the database using Argon2id verification.
+///
+/// Returns `None` if the key is invalid, expired, revoked, or environment-mismatched.
+/// Never reveals which specific check failed to the caller.
+pub async fn resolve_api_key(
+    pool: &PgPool,
+    raw_key: &str,
+    expected_environment: &str,
+) -> Option<AuthenticatedKey> {
+    if raw_key.len() < 8 {
+        return None;
+    }
+
+    // Derive prefix for fast index lookup (first 8 chars of the full key)
+    let key_prefix: String = raw_key.chars().take(8).collect();
+
+    let repo = ApiKeyRepository::new(pool.clone());
+
+    // Fetch candidates by prefix + environment (uses idx_api_keys_prefix_status)
+    let candidates = repo
+        .find_active_by_prefix(&key_prefix, expected_environment)
+        .await
+        .ok()?;
+
+    // Argon2id verify against each candidate (usually just one)
+    let matched = candidates
+        .into_iter()
+        .find(|k| verify_api_key(raw_key, &k.key_hash))?;
+
+    // Environment double-check (belt-and-suspenders — already filtered in query)
+    if matched.environment != expected_environment {
+        warn!(
+            key_id = %matched.id,
+            key_env = %matched.environment,
+            expected_env = %expected_environment,
+            "Environment mismatch on API key"
+        );
+        return None;
+    }
+
+    // Fetch granted scopes
+    let scopes: Vec<String> = sqlx::query_scalar!(
+        "SELECT scope_name FROM key_scopes WHERE api_key_id = $1 ORDER BY scope_name",
+        matched.id
+    )
+    .fetch_all(pool)
+    .await
+    .ok()
+    .unwrap_or_default();
+
+    // Fetch consumer type
+    let consumer_type: String = sqlx::query_scalar!(
+        "SELECT consumer_type FROM consumers WHERE id = $1",
+        matched.consumer_id
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_default();
+
+    // Update last_used_at asynchronously — does not block the request
     let row = match row {
         Ok(Some(r)) => r,
         Ok(None) => return LookupResult::NotFound,
@@ -198,6 +315,12 @@ async fn resolve_api_key_full(pool: &PgPool, raw_key: &str) -> LookupResult {
         .await;
     });
 
+    Some(AuthenticatedKey {
+        key_id: matched.id,
+        consumer_id: matched.consumer_id,
+        consumer_type,
+        environment: matched.environment,
+        scopes,
     LookupResult::Valid(AuthenticatedKey {
         key_id: row.key_id,
         consumer_id: row.consumer_id,
